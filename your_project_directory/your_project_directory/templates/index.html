@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bathymetry Map Visualization</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        header {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 0;
+            text-align: center;
+            width: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1000;
+        }
+        .container {
+            display: flex;
+            flex: 1;
+            margin-top: 50px; /* Adjusted for fixed header */
+            height: calc(100vh - 50px); /* Full height minus header */
+        }
+        .map-container {
+            flex: 1;
+            height: 100%;
+            position: relative;
+        }
+        .sidebar {
+            width: 300px;
+            background-color: #f8f9fa;
+            border-right: 1px solid #dee2e6;
+            padding: 20px;
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+            overflow-y: auto;
+            height: 100%;
+        }
+        .sidebar h2 {
+            margin-top: 0;
+        }
+        label {
+            display: block;
+            font-weight: bold;
+            margin: 10px 0 5px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .image-container {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .image-container img {
+            max-width: 100%;
+            max-height: 80vh; /* Limit height to 80% of the viewport height */
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        p {
+            color: red;
+            font-weight: bold;
+        }
+        .download-btn {
+            display: block;
+            margin: 20px auto;
+            padding: 10px 20px;
+            background-color: #28a745;
+            color: white;
+            text-align: center;
+            text-decoration: none;
+            border-radius: 5px;
+        }
+        .download-btn:hover {
+            background-color: #218838;
+        }
+        .process-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 10px 20px;
+            background-color: #ff5733; /* New color for the Process TIFF button */
+            color: white !important; /* Ensure text color is white */
+            font-weight: bold; /* Make text bold */
+            text-align: center;
+            text-decoration: none;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 1000;
+        }
+        .process-btn:hover {
+            background-color: #cc4626; /* Darker shade on hover */
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Bathymetry Map Visualization</h1>
+    </header>
+    <div class="container">
+        <div class="sidebar">
+            <h2>Bounding Box Coordinates</h2>
+            <form method="POST" action="/">
+                <label for="north">North Latitude:</label>
+                <input type="text" id="north" name="north" required><br>
+                
+                <label for="south">South Latitude:</label>
+                <input type="text" id="south" name="south" required><br>
+                
+                <label for="east">East Longitude:</label>
+                <input type="text" id="east" name="east" required><br>
+                
+                <label for="west">West Longitude:</label>
+                <input type="text" id="west" name="west" required><br>
+                
+                <button type="submit">Visualize</button>
+            </form>
+            
+            {% if image_data %}
+                <h2>Result:</h2>
+                <div class="image-container">
+                    <img src="data:image/png;base64,{{ image_data }}" alt="Bathymetry Image">
+                </div>
+                <!-- Form to download the TIFF file -->
+                <form method="POST" action="/download_tiff">
+                    <input type="hidden" name="file_path" value="{{ file_path }}">
+                    <input type="hidden" name="north" value="{{ request.form['north'] }}">
+                    <input type="hidden" name="south" value="{{ request.form['south'] }}">
+                    <input type="hidden" name="east" value="{{ request.form['east'] }}">
+                    <input type="hidden" name="west" value="{{ request.form['west'] }}">
+                    <button type="submit" class="download-btn">Download TIFF File</button>
+                </form>
+                <!-- Form to download the COG data -->
+                <form method="get" action="{{ url_for('download_cog') }}">
+                    <input type="hidden" name="file_path" value="{{ file_path }}">
+                    <input type="hidden" name="north" value="{{ request.form['north'] }}">
+                    <input type="hidden" name="south" value="{{ request.form['south'] }}">
+                    <input type="hidden" name="east" value="{{ request.form['east'] }}">
+                    <input type="hidden" name="west" value="{{ request.form['west'] }}">
+                    <button type="submit" class="download-btn" style="background-color: #17a2b8;">Download COG Data</button>
+                </form>
+            {% elif error %}
+                <p>{{ error }}</p>
+            {% endif %}
+        </div>
+        <div class="map-container" id="map">
+            <!-- Button to process TIFF file -->
+            <a href="/process_tiff" class="process-btn">Process TIFF</a>
+        </div>
+    </div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <script>
+        var map = L.map('map').setView([20, 77], 5);  // Center map on India
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        var drawnItems = new L.FeatureGroup().addTo(map);
+        var drawControl = new L.Control.Draw({
+            edit: {
+                featureGroup: drawnItems
+            }
+        });
+        map.addControl(drawControl);
+
+        map.on(L.Draw.Event.CREATED, function (event) {
+            var layer = event.layer;
+            drawnItems.addLayer(layer);
+
+            var bounds = layer.getBounds();
+            var north = bounds.getNorthEast().lat;
+            var south = bounds.getSouthWest().lat;
+            var east = bounds.getNorthEast().lng;
+            var west = bounds.getSouthWest().lng;
+
+            document.getElementById('north').value = north.toFixed(6);
+            document.getElementById('south').value = south.toFixed(6);
+            document.getElementById('east').value = east.toFixed(6);
+            document.getElementById('west').value = west.toFixed(6);
+        });
+    </script>
+</body>
+</html>
