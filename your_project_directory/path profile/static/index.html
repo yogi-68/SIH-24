@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TIFF to PNG and Elevation Profile</title>
+    <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2.21.0"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            display: flex;
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background-color: #f0f4f8;
+        }
+        #options {
+            width: 300px;
+            background-color: #333;
+            color: #fff;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        #options h1 {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+        }
+        #options input[type="file"] {
+            margin-bottom: 20px;
+        }
+        #options .button {
+            background-color: #007bff;
+            border: none;
+            color: #fff;
+            padding: 15px 25px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 1em;
+            margin-top: 10px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        #options .button:hover {
+            background-color: #0056b3;
+        }
+        #main-content {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start; /* Align items to the start (left) */
+        }
+        #imageContainer {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            width: 100%; /* Make sure it takes up all the available space */
+        }
+        #imageCanvas {
+            border: 1px solid #ccc;
+            margin-bottom: 20px;
+            max-width: 100%; /* Ensure canvas width does not exceed container */
+        }
+        #plot {
+            width: 100%;
+            max-width: 100%; /* Ensure plot width does not exceed the image width */
+            height: 400px;
+            background-color: #fff;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        #statusMessage {
+            margin-top: 20px;
+            font-size: 1em;
+            color: #333;
+        }
+        #drawInstruction {
+            display: none;
+            margin-top: 10px;
+            font-size: 1.2em; /* Increased font size for better visibility */
+            color: #ff0000; /* Changed color to red for better contrast */
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div id="options">
+        <h1>Options</h1>
+        <input type="file" id="fileInput" onchange="uploadFile()">
+        <button id="drawProfileButton" class="button" style="display: none;" onclick="enableDrawing()">Draw Path Profile</button>
+        <div id="statusMessage"></div>
+        <div id="drawInstruction">Draw the line to see path profile</div>
+    </div>
+    <div id="main-content">
+        <div id="imageContainer">
+            <img id="image" src="" alt="Image will appear here" style="display: none;">
+            <canvas id="imageCanvas"></canvas>
+            <div id="plot"></div>
+        </div>
+    </div>
+
+    <script>
+        let elevationData = null;
+        let img = new Image();
+        let canvas = document.getElementById('imageCanvas');
+        let ctx = canvas.getContext('2d');
+        let lineData = [];
+        let isDrawing = false;
+        let linePath = [];
+        let drawingEnabled = false;  // Flag to control drawing
+        let plotElement = document.getElementById('plot');
+        let statusMessage = document.getElementById('statusMessage');
+        let drawProfileButton = document.getElementById('drawProfileButton');
+        let drawInstruction = document.getElementById('drawInstruction');
+
+        function uploadFile() {
+            let file = document.getElementById('fileInput').files[0];
+            if (!file) {
+                statusMessage.innerHTML = 'Please choose a file.';
+                return;
+            }
+
+            let formData = new FormData();
+            formData.append('file', file);
+
+            $.ajax({
+                url: '/upload',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                success: function(data) {
+                    if (data.status === 'File uploaded and processed successfully') {
+                        img.src = '/image';
+                        img.onload = function() {
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                            ctx.drawImage(img, 0, 0);
+
+                            // Set the plot width to match the image width
+                            plotElement.style.width = `${img.width}px`;
+
+                            statusMessage.innerHTML = 'Image uploaded successfully.';
+                            drawProfileButton.style.display = 'block'; // Show the draw profile button
+                        };
+                    } else {
+                        statusMessage.innerHTML = `Error: ${data.error}`;
+                        drawProfileButton.style.display = 'none'; // Hide the button on error
+                    }
+                },
+                error: function() {
+                    statusMessage.innerHTML = 'Upload failed. Please try again.';
+                    drawProfileButton.style.display = 'none'; // Hide the button on error
+                }
+            });
+        }
+
+        function enableDrawing() {
+            drawingEnabled = true; // Enable drawing mode
+            statusMessage.innerHTML = 'Click and drag to draw a profile path.';
+            drawInstruction.style.display = 'block'; // Show the drawing instruction
+            setupCanvas();
+        }
+
+        function setupCanvas() {
+            if (drawingEnabled) {
+                canvas.addEventListener('mousedown', startDrawing);
+                canvas.addEventListener('mousemove', drawLine);
+                canvas.addEventListener('mouseup', finishDrawing);
+            }
+        }
+
+        function startDrawing(event) {
+            if (drawingEnabled) {
+                isDrawing = true;
+                lineData = [{x: event.offsetX, y: event.offsetY}];
+                linePath = [];
+            }
+        }
+
+        function drawLine(event) {
+            if (isDrawing && drawingEnabled) {
+                lineData.push({x: event.offsetX, y: event.offsetY});
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0);
+                ctx.beginPath();
+                ctx.moveTo(lineData[0].x, lineData[0].y);
+                for (let point of lineData.slice(1)) {
+                    ctx.lineTo(point.x, point.y);
+                }
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                linePath = lineData;
+                plotProfile();
+            }
+        }
+
+        function finishDrawing() {
+            if (drawingEnabled) {
+                isDrawing = false;
+            }
+        }
+
+        function plotProfile() {
+            if (linePath.length < 2) return; // Ensure there are at least two points
+            let start = linePath[0];
+            let end = linePath[linePath.length - 1];
+            $.ajax({
+                url: '/profile',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    start: [Math.round(start.x), Math.round(start.y)],
+                    end: [Math.round(end.x), Math.round(end.y)]
+                }),
+                success: function(profileData) {
+                    let distances = profileData.distances;
+                    let elevations = profileData.elevations;
+                    Plotly.newPlot('plot', [{
+                        x: distances,
+                        y: elevations,
+                        mode: 'lines',
+                        type: 'scatter'
+                    }]);
+
+                    // Add cursor tracking functionality
+                    Plotly.d3.select('#plot').on('plotly_hover', function(eventData) {
+                        let x = eventData.points[0].x;
+                        updateLinePosition(x);
+                    });
+                }
+            });
+        }
+
+        function updateLinePosition(x) {
+            if (linePath.length < 2) return;
+
+            // Mapping x to the coordinate space of the canvas
+            let minDist = Infinity;
+            let closestPoint = linePath[0];
+
+            // Find the closest point on the line
+            for (let point of linePath) {
+                let dist = Math.abs(point.x - x);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closestPoint = point;
+                }
+            }
+
+            // Redraw the canvas to include the updated line and marker
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+
+            // Redraw the line
+            ctx.beginPath();
+            ctx.moveTo(linePath[0].x, linePath[0].y);
+            for (let point of linePath.slice(1)) {
+                ctx.lineTo(point.x, point.y);
+            }
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Draw the blue marker at the closest point
+            ctx.beginPath();
+            ctx.arc(closestPoint.x, closestPoint.y, 5, 0, Math.PI * 2, false);
+            ctx.fillStyle = 'blue';
+            ctx.fill();
+        }
+    </script>
+</body>
+</html>
